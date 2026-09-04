@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { randomUUID } from 'node:crypto'
-import { getRedis } from './_store'
+import { getRedis } from './_store.js'
 
 const KEY = 'kraftskiva:seating'
 

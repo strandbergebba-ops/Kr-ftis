@@ -29,6 +29,12 @@ export function SeatingTable({
   const isDragging = useRef(false)
   const hasInteracted = useRef(false)
   const lastPos = useRef({ x: 0, y: 0 })
+  const pinchState = useRef<{
+    distance: number
+    zoom: number
+    midpoint: { x: number; y: number }
+    pan: { x: number; y: number }
+  } | null>(null)
 
   const seatPositions = getRectangleSeatPositions(TABLE_WIDTH, TABLE_HEIGHT, SEAT_OFFSET)
   const canvasWidth = TABLE_WIDTH + SEAT_OFFSET * 2 + 120
@@ -79,13 +85,14 @@ export function SeatingTable({
   )
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch' && pinchState.current) return
     isDragging.current = true
     lastPos.current = { x: e.clientX, y: e.clientY }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging.current) return
+    if (!isDragging.current || pinchState.current) return
     const dx = e.clientX - lastPos.current.x
     const dy = e.clientY - lastPos.current.y
     lastPos.current = { x: e.clientX, y: e.clientY }
@@ -94,6 +101,42 @@ export function SeatingTable({
 
   const handlePointerUp = () => {
     isDragging.current = false
+  }
+
+  const touchDistance = (a: React.Touch, b: React.Touch) =>
+    Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)
+
+  const touchMidpoint = (a: React.Touch, b: React.Touch) => ({
+    x: (a.clientX + b.clientX) / 2,
+    y: (a.clientY + b.clientY) / 2,
+  })
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 2) return
+    isDragging.current = false
+    hasInteracted.current = true
+    const [a, b] = [e.touches[0], e.touches[1]]
+    pinchState.current = {
+      distance: touchDistance(a, b),
+      zoom,
+      midpoint: touchMidpoint(a, b),
+      pan,
+    }
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length !== 2 || !pinchState.current) return
+    e.preventDefault()
+    const [a, b] = [e.touches[0], e.touches[1]]
+    const { distance, zoom: startZoom, midpoint, pan: startPan } = pinchState.current
+    const scale = touchDistance(a, b) / distance
+    setZoom(Math.min(maxZoom, Math.max(minZoom, startZoom * scale)))
+    const mid = touchMidpoint(a, b)
+    setPan({ x: startPan.x + (mid.x - midpoint.x), y: startPan.y + (mid.y - midpoint.y) })
+  }
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) pinchState.current = null
   }
 
   const handleSeatClick = (seatIndex: number) => {
@@ -115,6 +158,9 @@ export function SeatingTable({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         style={{ cursor: zoom > 1 ? 'grab' : 'default' }}
       >
         <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1 bg-surface border border-border rounded-md p-1 shadow-lg">
@@ -167,7 +213,7 @@ export function SeatingTable({
           style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: 'center center',
-            transition: isDragging.current ? 'none' : 'transform 80ms ease-out',
+            transition: isDragging.current || pinchState.current ? 'none' : 'transform 80ms ease-out',
           }}
         >
           <div className="relative" style={{ width: canvasWidth, height: canvasHeight }}>

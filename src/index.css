@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-crayfish: #ff6b2b;
+  --color-crayfish-dark: #e85d04;
+  --color-gold: #d4a853;
+  --color-surface: #141414;
+  --color-surface-light: #1e1e1e;
+  --color-border: #2a2a2a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: #0a0a0a;
+  color: #e5e5e5;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}

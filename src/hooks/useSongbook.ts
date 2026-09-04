@@ -4,14 +4,38 @@ import type { Song } from '../types'
 
 const STORAGE_KEY = 'kraftskiva-songbook-v1'
 
+const defaultSongSeeds: { title: string; melody: string | null }[] = [
+  { title: 'Jag ska festa', melody: 'Bamse' },
+  { title: 'Helan går', melody: null },
+  { title: 'Liten undulat', melody: null },
+  { title: 'Humlorna', melody: 'Karl-Alfred Boy' },
+  { title: 'Jag tror på akvavit', melody: 'Jag tror på sommaren' },
+  { title: 'Trolldrycken', melody: 'Trollmor' },
+  { title: 'Jag hade en gång en snaps', melody: 'Jag hade en gång en båt' },
+  { title: 'Hundliv', melody: 'Mors lilla Olle' },
+  { title: 'Fyllebjörnarna', melody: 'Bumbibjörnarna' },
+  { title: 'Midnattsmagi', melody: 'Midnatt råder' },
+]
+
+function createDefaultSongs(): Song[] {
+  return defaultSongSeeds.map(({ title, melody }) => ({
+    id: uuidv4(),
+    title,
+    lyrics: melody ? `Melodi: ${melody}\n\n` : '',
+  }))
+}
+
 function loadSongs(): Song[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as Song[]
+    if (raw) {
+      const parsed = JSON.parse(raw) as Song[]
+      return parsed.length > 0 ? parsed : createDefaultSongs()
+    }
   } catch {
     /* ignore */
   }
-  return []
+  return createDefaultSongs()
 }
 
 export function useSongbook() {

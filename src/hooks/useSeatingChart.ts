@@ -4,6 +4,8 @@ import type { EventDetails, Person, SeatingChartState } from '../types'
 import { seatKey } from '../types'
 
 const STORAGE_KEY = 'kraftskiva-seating-chart-v2'
+const API_URL = '/api/seating'
+const POLL_INTERVAL_MS = 4000
 
 const defaultEventDetails: EventDetails = {
   date: 'Lördag 16 augusti',
@@ -41,7 +43,7 @@ const defaultState: SeatingChartState = {
   eventDetails: defaultEventDetails,
 }
 
-function loadState(): SeatingChartState {
+function loadCachedState(): SeatingChartState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
@@ -49,10 +51,6 @@ function loadState(): SeatingChartState {
       return {
         ...parsed,
         people: parsed.people.length > 0 ? parsed.people : createDefaultGuests(),
-        table: { ...parsed.table, seatCount: 14, name: 'Långbordet' },
-        assignments: Object.fromEntries(
-          Object.entries(parsed.assignments).filter(([k]) => Number(k) < 14),
-        ),
       }
     }
   } catch {
@@ -61,71 +59,137 @@ function loadState(): SeatingChartState {
   return defaultState
 }
 
+function cacheState(state: SeatingChartState) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    /* ignore */
+  }
+}
+
 export function useSeatingChart() {
-  const [state, setState] = useState<SeatingChartState>(loadState)
+  const [state, setState] = useState<SeatingChartState>(loadCachedState)
+
+  const persist = useCallback((next: SeatingChartState) => {
+    cacheState(next)
+    fetch(API_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next),
+    }).catch(() => {
+      /* offline or store not connected yet — local cache still has it */
+    })
+  }, [])
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  }, [state])
+    let cancelled = false
 
-  const addPerson = useCallback((name: string, photoUrl: string | null) => {
-    const person: Person = { id: uuidv4(), name, photoUrl }
-    setState((s) => ({ ...s, people: [...s.people, person] }))
-    return person
+    async function poll() {
+      try {
+        const res = await fetch(API_URL)
+        if (!res.ok) return
+        const data = (await res.json()) as SeatingChartState
+        if (!cancelled) {
+          setState(data)
+          cacheState(data)
+        }
+      } catch {
+        /* offline or store not connected yet — keep showing cached state */
+      }
+    }
+
+    poll()
+    const interval = setInterval(poll, POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
   }, [])
+
+  const mutate = useCallback(
+    (updater: (s: SeatingChartState) => SeatingChartState) => {
+      setState((s) => {
+        const next = updater(s)
+        persist(next)
+        return next
+      })
+    },
+    [persist],
+  )
+
+  const addPerson = useCallback(
+    (name: string, photoUrl: string | null) => {
+      const person: Person = { id: uuidv4(), name, photoUrl }
+      mutate((s) => ({ ...s, people: [...s.people, person] }))
+      return person
+    },
+    [mutate],
+  )
 
   const updatePerson = useCallback(
     (id: string, updates: Partial<Pick<Person, 'name' | 'photoUrl'>>) => {
-      setState((s) => ({
+      mutate((s) => ({
         ...s,
         people: s.people.map((p) => (p.id === id ? { ...p, ...updates } : p)),
       }))
     },
-    [],
+    [mutate],
   )
 
-  const removePerson = useCallback((id: string) => {
-    setState((s) => ({
-      ...s,
-      people: s.people.filter((p) => p.id !== id),
-      assignments: Object.fromEntries(
-        Object.entries(s.assignments).map(([k, v]) => [k, v === id ? null : v]),
-      ),
-    }))
-  }, [])
+  const removePerson = useCallback(
+    (id: string) => {
+      mutate((s) => ({
+        ...s,
+        people: s.people.filter((p) => p.id !== id),
+        assignments: Object.fromEntries(
+          Object.entries(s.assignments).map(([k, v]) => [k, v === id ? null : v]),
+        ),
+      }))
+    },
+    [mutate],
+  )
 
-  const updateEventDetails = useCallback((updates: Partial<EventDetails>) => {
-    setState((s) => ({
-      ...s,
-      eventDetails: { ...s.eventDetails, ...updates },
-    }))
-  }, [])
+  const updateEventDetails = useCallback(
+    (updates: Partial<EventDetails>) => {
+      mutate((s) => ({
+        ...s,
+        eventDetails: { ...s.eventDetails, ...updates },
+      }))
+    },
+    [mutate],
+  )
 
-  const updateSeatCount = useCallback((seatCount: number) => {
-    setState((s) => ({
-      ...s,
-      table: { ...s.table, seatCount },
-      assignments: Object.fromEntries(
-        Object.entries(s.assignments).filter(([k]) => Number(k) < seatCount),
-      ),
-    }))
-  }, [])
+  const updateSeatCount = useCallback(
+    (seatCount: number) => {
+      mutate((s) => ({
+        ...s,
+        table: { ...s.table, seatCount },
+        assignments: Object.fromEntries(
+          Object.entries(s.assignments).filter(([k]) => Number(k) < seatCount),
+        ),
+      }))
+    },
+    [mutate],
+  )
 
-  const assignSeat = useCallback((seatIndex: number, personId: string | null) => {
-    const key = seatKey(seatIndex)
-    setState((s) => {
-      const assignments = { ...s.assignments }
+  const assignSeat = useCallback(
+    (seatIndex: number, personId: string | null) => {
+      const key = seatKey(seatIndex)
+      mutate((s) => {
+        const assignments = { ...s.assignments }
 
-      if (personId) {
-        for (const [k, v] of Object.entries(assignments)) {
-          if (v === personId) assignments[k] = null
+        if (personId) {
+          for (const [k, v] of Object.entries(assignments)) {
+            if (v === personId) assignments[k] = null
+          }
         }
-      }
 
-      assignments[key] = personId
-      return { ...s, assignments }
-    })
-  }, [])
+        assignments[key] = personId
+        return { ...s, assignments }
+      })
+    },
+    [mutate],
+  )
 
   const getPersonAtSeat = useCallback(
     (seatIndex: number): Person | null => {
